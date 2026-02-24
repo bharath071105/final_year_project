@@ -12,19 +12,20 @@ from sklearn.metrics import classification_report, confusion_matrix
 # --- 1. Dashboard Configuration ---
 st.set_page_config(page_title="HealthRisk AI Pro", layout="wide", page_icon="🏥")
 
-# --- 2. Secure Authentication ---
+# --- 2. Secure Authentication (via st.secrets) ---
 def check_password():
     if "password_correct" not in st.session_state:
         st.title("🔐 Clinical Access Portal")
         user = st.text_input("Username")
         pwd = st.text_input("Password", type="password")
         if st.button("Login"):
+            # Credentials are pulled from your .streamlit/secrets.toml
             if user in st.secrets["passwords"] and pwd == st.secrets["passwords"][user]:
                 st.session_state["password_correct"] = True
                 st.session_state["current_user"] = user
                 st.rerun()
             else:
-                st.error("Invalid credentials.")
+                st.error("Invalid credentials. Access Denied.")
         return False
     return True
 
@@ -39,10 +40,10 @@ def log_action(action, details):
         "Details": details
     })
 
-# --- 4. Main Application Flow ---
+# --- 4. Main Application ---
 if check_password():
     st.sidebar.title("🏥 HealthRisk AI")
-    st.sidebar.write(f"Active Clinician: **{st.session_state['current_user']}**")
+    st.sidebar.write(f"Clinician: **{st.session_state['current_user']}**")
     
     page = st.sidebar.radio("Clinical Workflow", 
         ["1. Data & Batch Processing", "2. Model Intelligence", "3. System Evaluation", "4. Patient Diagnosis", "5. Audit Trail"])
@@ -51,16 +52,18 @@ if check_password():
         del st.session_state["password_correct"]
         st.rerun()
 
-    # --- Page 1: Data Management ---
+    # --- Page 1: Data & Batch ---
     if page == "1. Data & Batch Processing":
         st.header("📂 Data Management")
-        t1, t2 = st.tabs(["Training Data", "Batch Assessment"])
+        t1, t2 = st.tabs(["Training Data Upload", "Batch Risk Assessment"])
+        
         with t1:
             uploaded_file = st.file_uploader("Upload Training CSV", type="csv")
             if uploaded_file:
                 st.session_state["data"] = pd.read_csv(uploaded_file)
-                st.success("Training data loaded.")
+                st.success("Training data synchronized.")
                 st.dataframe(st.session_state["data"].head(), use_container_width=True)
+
         with t2:
             if "model" not in st.session_state:
                 st.warning("Please train the model in Step 2 first.")
@@ -70,8 +73,11 @@ if check_password():
                     batch_df = pd.read_csv(batch_file)
                     features = st.session_state["features"]
                     X_batch = batch_df[features].fillna(batch_df[features].median())
-                    batch_df['Predicted_Risk'] = st.session_state["model"].predict(X_batch)
+                    
+                    preds = st.session_state["model"].predict(X_batch)
+                    batch_df['Predicted_Risk'] = preds
                     st.dataframe(batch_df, use_container_width=True)
+                    
                     log_action("Batch Processing", f"Analyzed {len(batch_df)} records")
                     st.download_button("📥 Export Results", batch_df.to_csv(index=False), "risk_results.csv")
 
@@ -82,16 +88,18 @@ if check_password():
         if "data" in st.session_state:
             df = st.session_state["data"]
             if st.button("🚀 Train Clinical Ensemble"):
-                with st.spinner("Optimizing weights..."):
+                with st.spinner("Optimizing Models..."):
                     X = df.drop("Risk_Level", axis=1).select_dtypes(include=[np.number])
                     y = df["Risk_Level"]
                     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+                    
                     model = VotingClassifier(estimators=[
                         ('rf', RandomForestClassifier(n_estimators=100)), 
                         ('gb', GradientBoostingClassifier()), 
                         ('lr', LogisticRegression(max_iter=1000))
                     ], voting='soft')
                     model.fit(X_train, y_train)
+                    
                     st.session_state.update({"model": model, "X_test": X_test, "y_test": y_test, "features": X.columns.tolist()})
                     log_action("Model Training", "Ensemble model retrained.")
                     st.success("Ensemble Intelligence Active.")
@@ -117,7 +125,7 @@ if check_password():
 
     # --- Page 4: Patient Diagnosis ---
     elif page == "4. Patient Diagnosis":
-        st.header("🩺 Clinical Assessment")
+        st.header("🩺 Clinical Risk Assessment")
         if "model" in st.session_state:
             model = st.session_state["model"]
             features = st.session_state["features"]
@@ -134,45 +142,37 @@ if check_password():
                         user_input.append(val)
             
             with display_col:
-                # FIX: Ensure we extract probability as a standard Python float to prevent Plotly errors
-                raw_probs = model.predict_proba([user_input])[0]
-                risk_prob = float(raw_probs[-1] * 100) 
+                probs = model.predict_proba([user_input])[0]
+                risk_prob = probs[-1] * 100 
                 
-                # Dynamic Threshold Logic
-                if risk_prob >= 50: status_color, status_label = "#e74c3c", "HIGH RISK"
-                elif risk_prob >= 25: status_color, status_label = "#f1c40f", "MODERATE RISK"
-                else: status_color, status_label = "#2ecc71", "LOW RISK"
+                # High Sensitivity Sensitivity logic
+                if risk_prob >= 50:
+                    status_color, status_label = "#e74c3c", "CRITICAL / HIGH RISK"
+                elif risk_prob >= 25:
+                    status_color, status_label = "#f1c40f", "MODERATE / MONITORING"
+                else:
+                    status_color, status_label = "#2ecc71", "STABLE / LOW RISK"
 
-                # --- Error-Proofed Gauge Meter ---
-                try:
-                    fig = go.Figure(go.Indicator(
-                        mode="gauge+number+delta", 
-                        value=risk_prob,
-                        number={'suffix': "%", 'font': {'size': 60}},
-                        delta={'reference': 20, 'increasing': {'color': "red"}},
-                        gauge={'axis': {'range': [0, 100]},
-                               'bar': {'color': "black", 'thickness': 0.2},
-                               'steps': [{'range': [0, 25], 'color': "#2ecc71"}, 
-                                         {'range': [25, 50], 'color': "#f1c40f"}, 
-                                         {'range': [50, 100], 'color': "#e74c3c"}],
-                               'threshold': {'line': {'color': "black", 'width': 4}, 'value': 50}},
-                        title={'text': "Risk Probability Index", 'font': {'size': 24, 'bold': True}}))
-                    
-                    fig.update_layout(height=450, margin=dict(l=30, r=30, t=80, b=30))
-                    st.plotly_chart(fig, use_container_width=True)
-                except Exception as e:
-                    st.error(f"Visualization Error: {e}")
-                    st.metric("Risk Probability", f"{risk_prob:.1f}%")
+                # GAUGE METER
+                fig = go.Figure(go.Indicator(
+                    mode="gauge+number+delta", value=risk_prob,
+                    delta={'reference': 20, 'increasing': {'color': "red"}},
+                    gauge={'axis': {'range': [0, 100]},
+                           'bar': {'color': "black"},
+                           'steps': [{'range': [0, 25], 'color': "#2ecc71"}, 
+                                     {'range': [25, 50], 'color': "#f1c40f"}, 
+                                     {'range': [50, 100], 'color': "#e74c3c"}],
+                           'threshold': {'line': {'color': "black", 'width': 4}, 'value': 50}},
+                    title={'text': "Risk Probability Index"}))
+                st.plotly_chart(fig, use_container_width=True)
                 
-                # Action Alert Card
-                st.markdown(f"""
-                    <div style='background-color:{status_color}; padding:20px; border-radius:10px; text-align:center;'>
-                        <h2 style='color:white; margin:0;'>{status_label}</h2>
-                        <p style='color:white; margin:0; opacity:0.9;'>System Confidence: {risk_prob:.1f}%</p>
-                    </div>
-                """, unsafe_allow_html=True)
+                # STATUS CARD
+                st.markdown(f"""<div style="background-color:{status_color}; padding:20px; border-radius:10px; text-align:center;">
+                    <h2 style="color:white; margin:0;">{status_label}</h2>
+                    <p style="color:white; margin:0; opacity:0.8;">Assessment Confidence: {risk_prob:.1f}%</p>
+                    </div>""", unsafe_allow_html=True)
                 
-                # Feature Importance Analysis
+                # RISK DRIVER CHART
                 st.write("---")
                 st.subheader("🧬 Risk Driver Analysis")
                 rf_model = model.named_estimators_['rf']
@@ -183,10 +183,10 @@ if check_password():
                 st.plotly_chart(fig_bar, use_container_width=True)
 
                 if st.button("💾 Log Verified Diagnosis"):
-                    log_action("Individual Diagnosis", f"Risk: {risk_prob:.1f}%")
+                    log_action("Individual Diagnosis", f"Risk: {risk_prob:.1f}% | Lead Driver: {contrib_df.iloc[-1]['Metric']}")
                     st.toast("Clinical Log Updated", icon="🏥")
         else:
-            st.warning("Train model in Step 2 first.")
+            st.warning("Train model first.")
 
     # --- Page 5: Audit Trail ---
     elif page == "5. Audit Trail":
@@ -196,4 +196,4 @@ if check_password():
             st.dataframe(log_df, use_container_width=True)
             st.download_button("📥 Export Logs", log_df.to_csv(index=False), "audit_trail.csv")
         else:
-            st.info("No activity recorded in this session.")
+            st.info("No activity recorded.")
