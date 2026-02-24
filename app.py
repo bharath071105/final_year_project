@@ -134,37 +134,42 @@ if check_password():
                         user_input.append(val)
             
             with display_col:
-                probs = model.predict_proba([user_input])[0]
-                risk_prob = probs[-1] * 100 
+                # FIX: Ensure we extract the probability as a standard float
+                raw_probs = model.predict_proba([user_input])[0]
+                risk_prob = float(raw_probs[-1] * 100) 
                 
                 # Dynamic Color Logic
                 if risk_prob >= 50: status_color, status_label = "#e74c3c", "HIGH RISK"
                 elif risk_prob >= 25: status_color, status_label = "#f1c40f", "MODERATE RISK"
                 else: status_color, status_label = "#2ecc71", "LOW RISK"
 
-                # --- Clear Percentage Meter ---
-                fig = go.Figure(go.Indicator(
-                    mode="gauge+number+delta", value=risk_prob,
-                    number={'suffix': "%", 'font': {'size': 60}},
-                    delta={'reference': 20, 'increasing': {'color': "red"}},
-                    gauge={'axis': {'range': [0, 100]},
-                           'bar': {'color': "black", 'thickness': 0.2},
-                           'steps': [{'range': [0, 25], 'color': "#2ecc71"}, 
-                                     {'range': [25, 50], 'color': "#f1c40f"}, 
-                                     {'range': [50, 100], 'color': "#e74c3c"}],
-                           'threshold': {'line': {'color': "black", 'width': 4}, 'value': 50}},
-                    title={'text': "Risk Probability", 'font': {'size': 24, 'bold': True}}))
-                st.plotly_chart(fig, use_container_width=True)
+                # --- Gauge with Error Handling ---
+                try:
+                    fig = go.Figure(go.Indicator(
+                        mode="gauge+number", 
+                        value=risk_prob,
+                        number={'suffix': "%", 'font': {'size': 60}},
+                        gauge={'axis': {'range': [0, 100]},
+                               'bar': {'color': "black", 'thickness': 0.2},
+                               'steps': [{'range': [0, 25], 'color': "#2ecc71"}, 
+                                         {'range': [25, 50], 'color': "#f1c40f"}, 
+                                         {'range': [50, 100], 'color': "#e74c3c"}],
+                               'threshold': {'line': {'color': "black", 'width': 4}, 'value': 50}},
+                        title={'text': "Risk Probability Index", 'font': {'size': 24, 'bold': True}}))
+                    st.plotly_chart(fig, use_container_width=True)
+                except Exception as e:
+                    st.error(f"Visualization Error: {e}")
+                    st.metric("Risk Probability", f"{risk_prob:.1f}%")
                 
-                # --- Status & Driver Chart ---
+                # Status Card
                 st.markdown(f"<div style='background-color:{status_color}; padding:20px; border-radius:10px; text-align:center;'><h2 style='color:white; margin:0;'>{status_label}</h2></div>", unsafe_allow_html=True)
                 
+                # Driver Analysis
                 st.write("---")
                 st.subheader("🧬 Risk Driver Analysis")
                 rf_model = model.named_estimators_['rf']
                 contributions = rf_model.feature_importances_ * np.array(user_input)
                 contrib_df = pd.DataFrame({'Metric': features, 'Impact': contributions}).sort_values(by='Impact')
-                
                 fig_bar = px.bar(contrib_df, x='Impact', y='Metric', orientation='h', color_discrete_sequence=[status_color])
                 st.plotly_chart(fig_bar, use_container_width=True)
 
@@ -180,6 +185,5 @@ if check_password():
         if "audit_log" in st.session_state:
             log_df = pd.DataFrame(st.session_state["audit_log"])
             st.dataframe(log_df, use_container_width=True)
-            st.download_button("📥 Export Logs", log_df.to_csv(index=False), "audit_trail.csv")
         else:
             st.info("No activity recorded.")
