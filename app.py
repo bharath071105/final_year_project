@@ -8,19 +8,16 @@ from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, VotingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, confusion_matrix
+from openai import OpenAI
 
-# ---------------------------------------------------
+# =====================================================
 # PAGE CONFIG
-# ---------------------------------------------------
-st.set_page_config(
-    page_title="HealthRisk AI",
-    page_icon="🏥",
-    layout="wide"
-)
+# =====================================================
+st.set_page_config(page_title="HealthRisk AI", page_icon="🏥", layout="wide")
 
-# ---------------------------------------------------
-# CUSTOM STYLING
-# ---------------------------------------------------
+# =====================================================
+# CUSTOM UI STYLING
+# =====================================================
 st.markdown("""
 <style>
 #MainMenu {visibility: hidden;}
@@ -39,52 +36,33 @@ header {visibility: hidden;}
     height: 42px;
     font-weight: 600;
 }
-
-.metric-card {
-    background: white;
-    padding: 25px;
-    border-radius: 12px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
-    text-align:center;
-}
-
-.risk-card {
-    padding: 30px;
-    border-radius: 15px;
-    text-align:center;
-    color: white;
-    font-weight: 600;
-}
-
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------------------------------------------
+# =====================================================
 # AUTHENTICATION
-# ---------------------------------------------------
+# =====================================================
 def check_password():
     if "password_correct" not in st.session_state:
-        st.markdown("## 🔐 Clinical Access Portal")
-        col1, col2, col3 = st.columns([1,2,1])
+        st.title("🔐 Clinical Access Portal")
 
-        with col2:
-            user = st.text_input("Username")
-            pwd = st.text_input("Password", type="password")
+        user = st.text_input("Username")
+        pwd = st.text_input("Password", type="password")
 
-            if st.button("Login"):
-                if user in st.secrets["passwords"] and pwd == st.secrets["passwords"][user]:
-                    st.session_state["password_correct"] = True
-                    st.session_state["current_user"] = user
-                    st.rerun()
-                else:
-                    st.error("Invalid credentials")
+        if st.button("Login"):
+            if user in st.secrets["passwords"] and pwd == st.secrets["passwords"][user]:
+                st.session_state["password_correct"] = True
+                st.session_state["current_user"] = user
+                st.rerun()
+            else:
+                st.error("Invalid credentials")
 
         return False
     return True
 
-# ---------------------------------------------------
-# AUDIT LOG
-# ---------------------------------------------------
+# =====================================================
+# AUDIT LOGGING
+# =====================================================
 def log_action(action, details):
     if "audit_log" not in st.session_state:
         st.session_state["audit_log"] = []
@@ -96,17 +74,37 @@ def log_action(action, details):
         "Details": details
     })
 
-# ---------------------------------------------------
-# MAIN APPLICATION
-# ---------------------------------------------------
+# =====================================================
+# AI NAVIGATION HANDLER
+# =====================================================
+def handle_navigation_command(message):
+    msg = message.lower()
+    pages = ["Dashboard", "Risk Assessment", "Batch Processing",
+             "Model Center", "System Evaluation", "Audit Log"]
+
+    for p in pages:
+        if p.lower() in msg:
+            st.session_state["nav"] = p
+            return f"Navigation detected. Redirecting to **{p}**."
+    return None
+
+# =====================================================
+# MAIN APP
+# =====================================================
 if check_password():
 
-    # ---------------- NAVIGATION ----------------
+    if "nav" not in st.session_state:
+        st.session_state["nav"] = "Dashboard"
+
     page = st.selectbox(
         "",
-        ["Dashboard", "Risk Assessment", "Batch Processing", "Model Center", "System Evaluation", "Audit Log"]
+        ["Dashboard", "Risk Assessment", "Batch Processing",
+         "Model Center", "System Evaluation", "Audit Log"],
+        index=["Dashboard", "Risk Assessment", "Batch Processing",
+               "Model Center", "System Evaluation", "Audit Log"].index(st.session_state["nav"])
     )
 
+    st.session_state["nav"] = page
     st.markdown("---")
 
     # =====================================================
@@ -115,26 +113,28 @@ if check_password():
     if page == "Dashboard":
 
         st.title("🏥 HealthRisk AI Platform")
-        st.caption("AI-Powered Multi-Disease Risk Prediction System")
+        st.caption("Explainable Multi-Disease Risk Prediction System with Integrated AI Support")
 
         col1, col2, col3 = st.columns(3)
+        col1.metric("System Status", "Operational")
+        col2.metric("Active User", st.session_state["current_user"])
+        col3.metric("Model Status", "Trained" if "model" in st.session_state else "Not Trained")
 
-        with col1:
-            st.metric("System Status", "Operational", "✔ Secure")
-
-        with col2:
-            st.metric("Logged User", st.session_state["current_user"])
-
-        with col3:
-            st.metric("Models Loaded", "Ensemble Ready" if "model" in st.session_state else "Not Trained")
-
-        st.markdown("### Platform Capabilities")
+        st.markdown("### Model Transparency")
         st.info("""
-        • Multi-Disease Risk Prediction  
-        • Clinical Ensemble Modeling  
-        • Batch Patient Processing  
-        • Explainable Risk Drivers  
-        • Secure Audit Logging  
+        Ensemble Method: Soft Voting Classifier  
+        Base Models:
+        - Random Forest  
+        - Gradient Boosting  
+        - Logistic Regression  
+        Training Split: 80/20  
+        """)
+
+        st.markdown("### Ethical Considerations")
+        st.warning("""
+        This system is developed for academic research purposes.
+        It provides probabilistic risk estimation and does not constitute
+        medical diagnosis or clinical decision-making authority.
         """)
 
     # =====================================================
@@ -142,7 +142,7 @@ if check_password():
     # =====================================================
     elif page == "Model Center":
 
-        st.header("⚙️ Model Intelligence Center")
+        st.header("⚙️ Model Training Center")
 
         uploaded_file = st.file_uploader("Upload Training Dataset (CSV)", type="csv")
 
@@ -156,42 +156,40 @@ if check_password():
 
                 df = st.session_state["data"]
 
-                with st.spinner("Training Clinical Ensemble..."):
+                X = df.drop("Risk_Level", axis=1).select_dtypes(include=[np.number])
+                y = df["Risk_Level"]
 
-                    X = df.drop("Risk_Level", axis=1).select_dtypes(include=[np.number])
-                    y = df["Risk_Level"]
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y, test_size=0.2, random_state=42
+                )
 
-                    X_train, X_test, y_train, y_test = train_test_split(
-                        X, y, test_size=0.2, random_state=42
-                    )
+                model = VotingClassifier(estimators=[
+                    ('rf', RandomForestClassifier(n_estimators=100)),
+                    ('gb', GradientBoostingClassifier()),
+                    ('lr', LogisticRegression(max_iter=1000))
+                ], voting='soft')
 
-                    model = VotingClassifier(estimators=[
-                        ('rf', RandomForestClassifier(n_estimators=100)),
-                        ('gb', GradientBoostingClassifier()),
-                        ('lr', LogisticRegression(max_iter=1000))
-                    ], voting='soft')
+                model.fit(X_train, y_train)
 
-                    model.fit(X_train, y_train)
+                st.session_state.update({
+                    "model": model,
+                    "X_test": X_test,
+                    "y_test": y_test,
+                    "features": X.columns.tolist()
+                })
 
-                    st.session_state.update({
-                        "model": model,
-                        "X_test": X_test,
-                        "y_test": y_test,
-                        "features": X.columns.tolist()
-                    })
-
-                    log_action("Model Training", "Ensemble retrained")
-                    st.success("Model Training Completed")
+                log_action("Model Training", "Ensemble trained")
+                st.success("Model Training Completed")
 
     # =====================================================
     # RISK ASSESSMENT
     # =====================================================
     elif page == "Risk Assessment":
 
-        st.header("🩺 Patient Risk Assessment")
+        st.header("🩺 Individual Risk Assessment")
 
         if "model" not in st.session_state:
-            st.warning("Please train the model first in Model Center.")
+            st.warning("Train model first.")
         else:
 
             model = st.session_state["model"]
@@ -219,63 +217,38 @@ if check_password():
 
                 probs = model.predict_proba([inputs])[0]
                 risk_prob = probs[-1] * 100
+                st.session_state["last_risk_score"] = f"{risk_prob:.1f}%"
 
-                if risk_prob >= 50:
-                    color, label = "#e74c3c", "HIGH RISK"
-                elif risk_prob >= 25:
-                    color, label = "#f1c40f", "MODERATE RISK"
-                else:
-                    color, label = "#2ecc71", "LOW RISK"
+                st.subheader("Predicted Risk Score")
+                st.metric("Risk Probability", f"{risk_prob:.1f}%")
 
-                # Risk Card
-                st.markdown(f"""
-                <div class="risk-card" style="background:{color};">
-                    <h1 style="font-size:48px;">{risk_prob:.1f}%</h1>
-                    <p>{label}</p>
-                </div>
-                """, unsafe_allow_html=True)
-
-                # Gauge
                 fig = go.Figure(go.Indicator(
                     mode="gauge+number",
                     value=risk_prob,
-                    gauge={'axis': {'range': [0, 100]},
-                           'steps': [
-                               {'range': [0, 25], 'color': "#2ecc71"},
-                               {'range': [25, 50], 'color': "#f1c40f"},
-                               {'range': [50, 100], 'color': "#e74c3c"}
-                           ]}
+                    gauge={'axis': {'range': [0, 100]}}
                 ))
-
                 st.plotly_chart(fig, use_container_width=True)
 
-                # Risk Drivers
-                st.subheader("Risk Driver Analysis")
                 rf_model = model.named_estimators_['rf']
                 contributions = rf_model.feature_importances_ * np.array(inputs)
+
                 contrib_df = pd.DataFrame({
-                    'Feature': features,
-                    'Impact': contributions
-                }).sort_values(by='Impact')
+                    "Feature": features,
+                    "Impact": contributions
+                }).sort_values("Impact")
 
-                fig_bar = px.bar(
-                    contrib_df,
-                    x='Impact',
-                    y='Feature',
-                    orientation='h',
-                    color_discrete_sequence=[color]
-                )
-
+                st.subheader("Feature Contribution Analysis")
+                fig_bar = px.bar(contrib_df, x="Impact", y="Feature", orientation="h")
                 st.plotly_chart(fig_bar, use_container_width=True)
 
-                log_action("Individual Assessment", f"Risk Score: {risk_prob:.1f}%")
+                log_action("Risk Assessment", f"Risk Score {risk_prob:.1f}%")
 
     # =====================================================
     # BATCH PROCESSING
     # =====================================================
     elif page == "Batch Processing":
 
-        st.header("📂 Batch Patient Risk Analysis")
+        st.header("📂 Batch Risk Prediction")
 
         if "model" not in st.session_state:
             st.warning("Train model first.")
@@ -306,48 +279,102 @@ if check_password():
     # =====================================================
     elif page == "System Evaluation":
 
-        st.header("📊 Model Performance Analytics")
+        st.header("📊 Model Evaluation")
 
         if "model" not in st.session_state:
             st.warning("Train model first.")
         else:
+
             y_pred = st.session_state["model"].predict(st.session_state["X_test"])
 
-            col1, col2 = st.columns(2)
+            st.subheader("Classification Report")
+            report_df = pd.DataFrame(
+                classification_report(
+                    st.session_state["y_test"],
+                    y_pred,
+                    output_dict=True
+                )
+            ).transpose()
 
-            with col1:
-                st.subheader("Classification Report")
-                report_df = pd.DataFrame(
-                    classification_report(
-                        st.session_state["y_test"],
-                        y_pred,
-                        output_dict=True
-                    )
-                ).transpose()
+            st.dataframe(report_df)
 
-                st.dataframe(report_df)
-
-            with col2:
-                st.subheader("Confusion Matrix")
-                cm = confusion_matrix(st.session_state["y_test"], y_pred)
-                fig = px.imshow(cm, text_auto=True)
-                st.plotly_chart(fig, use_container_width=True)
+            st.subheader("Confusion Matrix")
+            cm = confusion_matrix(st.session_state["y_test"], y_pred)
+            fig = px.imshow(cm, text_auto=True)
+            st.plotly_chart(fig, use_container_width=True)
 
     # =====================================================
     # AUDIT LOG
     # =====================================================
     elif page == "Audit Log":
 
-        st.header("📋 Clinical Audit Trail")
+        st.header("📋 Audit Trail")
 
         if "audit_log" in st.session_state:
             log_df = pd.DataFrame(st.session_state["audit_log"])
             st.dataframe(log_df, use_container_width=True)
-
-            st.download_button(
-                "Export Audit Log",
-                log_df.to_csv(index=False),
-                "audit_log.csv"
-            )
         else:
             st.info("No recorded activity yet.")
+
+    # =====================================================
+    # AI CLINICAL ASSISTANT (FYP LEVEL)
+    # =====================================================
+    st.markdown("---")
+    st.markdown("## 🧠 AI Clinical Decision Support Assistant")
+
+    if "chat_history" not in st.session_state:
+        st.session_state["chat_history"] = []
+
+    client = OpenAI(api_key=st.secrets["openai"]["api_key"])
+
+    for msg in st.session_state["chat_history"]:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    if prompt := st.chat_input("Enter clinical or system-related query..."):
+
+        st.session_state["chat_history"].append({"role": "user", "content": prompt})
+
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        nav_response = handle_navigation_command(prompt)
+
+        if nav_response:
+            response = nav_response
+        else:
+
+            system_prompt = f"""
+            You are a Clinical Decision Support Assistant.
+
+            Latest risk score: {st.session_state.get("last_risk_score", "Not available")}
+
+            Respond using:
+            1. Risk Interpretation
+            2. Contributing Factors
+            3. Statistical Context
+            4. Preventive Considerations
+            5. Model Limitations
+
+            Keep academic tone.
+            Do not provide diagnosis.
+            """
+
+            completion = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    *st.session_state["chat_history"]
+                ],
+                temperature=0.2
+            )
+
+            response = completion.choices[0].message.content
+            response += "\n\n⚠️ This output is for academic research purposes only."
+
+        log_action("AI Query", prompt)
+
+        st.session_state["chat_history"].append({"role": "assistant", "content": response})
+
+        with st.chat_message("assistant"):
+            st.markdown(response)
